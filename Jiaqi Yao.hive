@@ -1,0 +1,115 @@
+-- Create Table 1995, here I used deleted version of original data
+-- Add corresponding columns if using the originaltblproperties 
+-- & Pend tblproperties("skip.header.line.count"="1"); as done in airport data
+
+CREATE TABLE air1995 (year INT, month INT, dayofmonth INT, dayofweek INT, deptime INT, crsdeptime INT, arrtime INT, crsarrtime INT,
+                   uniquecarrier STRING, flightnum INT, tailnum STRING, actualelapsedtime INT, crselapsedtime INT, 
+                   airtime INT, arrdelay INT, depdelay INT, origin STRING, dest STRING, distance INT, taxiin INT, 
+                   taxiout INT, cancelled INT, diverted INT)
+ROW FORMAT DELIMITED FIELDS TERMINATED BY ',';
+  
+LOAD DATA LOCAL INPATH '/home/host-data/hb-workspace/1995_del.csv' 
+OVERWRITE INTO TABLE air1995;
+
+SELECT * FROM air1995;
+
+-- Create Table 1996, use deleted data
+CREATE TABLE air1996 (year INT, month INT, dayofmonth INT, dayofweek INT, deptime INT, crsdeptime INT, arrtime INT, crsarrtime INT,
+                   uniquecarrier STRING, flightnum INT, tailnum STRING, actualelapsedtime INT, crselapsedtime INT, 
+                   airtime INT, arrdelay INT, depdelay INT, origin STRING, dest STRING, distance INT, taxiin INT, 
+                   taxiout INT, cancelled INT, diverted INT)
+ROW FORMAT DELIMITED FIELDS TERMINATED BY ',';
+
+LOAD DATA LOCAL INPATH '/home/host-data/hb-workspace/1996_del.csv' 
+OVERWRITE INTO TABLE air1996;
+
+SELECT * FROM air1996;
+
+-- Create Table airport
+CREATE TABLE airport (idata STRING, airport STRING, city STRING, state STRING, country STRING, lat INT, long INT)
+ROW FORMAT SERDE 'org.apache.hadoop.hive.serde2.OpenCSVSerde'
+ WITH SERDEPROPERTIES (
+   "separatorChar" = ",",
+   "quoteChar"     = "\""
+ )  
+tblproperties("skip.header.line.count"="1");
+
+LOAD DATA LOCAL INPATH '/home/host-data/hb-workspace/airports.csv' 
+OVERWRITE INTO TABLE airport;
+
+SELECT * FROM airport;
+
+-- Create Table plane
+CREATE TABLE plane(tailnum STRING,	type STRING, manufacturer STRING, issue_date STRING, model STRING,	
+                    status STRING, aircraft_type STRING, engine_type STRING, year INT)
+ROW FORMAT DELIMITED FIELDS TERMINATED BY ','
+tblproperties("skip.header.line.count"="1");
+
+LOAD DATA LOCAL INPATH '/home/host-data/hb-workspace/plane-data.csv' 
+OVERWRITE INTO TABLE plane;
+
+INSERT OVERWRITE TABLE plane
+SELECT * FROM plane
+WHERE type IS NOT NULL;
+
+SELECT * FROM plane;
+
+
+-- Create Table carrier
+CREATE TABLE carrier (code STRING, description STRING)
+ROW FORMAT SERDE 'org.apache.hadoop.hive.serde2.OpenCSVSerde'
+ WITH SERDEPROPERTIES (
+   "separatorChar" = ",",
+   "quoteChar"     = "\""
+ )  
+tblproperties("skip.header.line.count"="1");
+
+LOAD DATA LOCAL INPATH '/home/host-data/hb-workspace/carriers.csv' 
+OVERWRITE INTO TABLE carrier;
+
+-- UNION air1995 and air1996, only positive delay count is selected
+CREATE TABLE airlines_delay AS
+SELECT * FROM air1995
+WHERE air1995.depdelay >0
+UNION ALL
+SELECT * FROM air1996
+WHERE air1996.depdelay >0;
+
+-- UNION airport origin
+DROP TABLE IF EXISTS ORIG;
+CREATE TABLE ORIG AS
+SELECT airlines_delay.depdelay, airlines_delay.origin, airlines_delay.dest,  airport.state AS orig_state, airport.country AS orig_country, airport.lat AS orig_lat, airport.long AS orig_long
+FROM airlines_delay LEFT OUTER JOIN airport ON (airlines_delay.origin = airport.idata);
+
+SELECT * FROM ORIG;
+
+-- UNION airport dest
+DROP TABLE IF EXISTS ORIG_DEST;
+CREATE TABLE ORIG_DEST AS
+SELECT ORIG.*, airport.state AS dest_state, airport.country AS dest_country, airport.lat AS dest_lat, airport.long as dest_long
+FROM ORIG LEFT OUTER JOIN airport on (ORIG.dest = airport.idata);
+
+SELECT * FROM ORIG_DEST;
+
+
+
+DROP TABLE IF EXISTS AVE_ORIG;
+
+CREATE TABLE AVE_ORIG AS
+SELECT  orig_state, AVG(depdelay), COUNT(depdelay) AS count
+FROM ORIG_DEST WHERE orig_country='USA'
+GROUP BY  orig_state;
+
+SELECT * FROM AVE_ORIG;
+
+
+DROP TABLE IF EXISTS ROUTE_n;
+
+CREATE TABLE ROUTE_n AS
+SELECT origin, dest, orig_lat, orig_long, dest_lat, dest_long, COUNT(depdelay) AS counts, AVG(depdelay) AS ave_delay
+From ORIG_DEST 
+WHERE orig_country ='USA' AND dest_country ='USA'
+GROUP BY origin, dest, orig_lat, orig_long, dest_lat, dest_long
+SORT BY counts DESC;
+
+SELECT * FROM ROUTE_n;
